@@ -5,13 +5,8 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Download, Music } from "lucide-react";
 import { Mp3ResultItem } from "@/components/Mp3ResultItem";
-
-interface Mp3Result {
-  id: string;
-  filename: string;
-  url: string;
-  source: string;
-}
+import { apiRequest } from "@/lib/queryClient";
+import type { Mp3Result, ExtractMp3Response } from "@shared/schema";
 
 export default function Home() {
   const [url, setUrl] = useState("");
@@ -40,37 +35,41 @@ export default function Home() {
 
     setLoading(true);
     
-    // TODO: remove mock functionality - Replace with actual API call
-    setTimeout(() => {
-      const mockResults: Mp3Result[] = [
-        {
-          id: "1",
-          filename: "podcast-episode-42.mp3",
-          url: "https://example.com/audio/podcast-episode-42.mp3",
-          source: "<audio> tag",
+    try {
+      const response = await apiRequest<ExtractMp3Response>("/api/extract-mp3", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+        headers: {
+          "Content-Type": "application/json",
         },
-        {
-          id: "2",
-          filename: "background-music.mp3",
-          url: "https://cdn.example.com/media/background-music.mp3",
-          source: "Direct link",
-        },
-        {
-          id: "3",
-          filename: "interview-2024-11-08.mp3",
-          url: "https://storage.example.com/interviews/interview-2024-11-08.mp3",
-          source: "<source> element",
-        },
-      ];
-      
-      setResults(mockResults);
-      setLoading(false);
-      
-      toast({
-        title: "Extraction Complete",
-        description: `Found ${mockResults.length} MP3 file${mockResults.length !== 1 ? 's' : ''}`,
       });
-    }, 1500);
+
+      setResults(response.results);
+      
+      if (response.results.length > 0) {
+        toast({
+          title: "Extraction Complete",
+          description: `Found ${response.results.length} MP3 file${response.results.length !== 1 ? 's' : ''}`,
+        });
+      } else {
+        toast({
+          title: "No MP3s Found",
+          description: "No MP3 files were found on this webpage",
+        });
+      }
+    } catch (error: any) {
+      console.error("Extraction error:", error);
+      console.log("Showing error toast with message:", error.message);
+      const toastResult = toast({
+        title: "Extraction Failed",
+        description: error.message || "Failed to extract MP3s from the webpage",
+        variant: "destructive",
+      });
+      console.log("Toast called, result:", toastResult);
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
