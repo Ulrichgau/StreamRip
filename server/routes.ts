@@ -19,6 +19,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { url } = validation.data;
 
+      // Check if this is an ARD Audiothek URL and handle it specially
+      const ardAudiothekMatch = url.match(/ardaudiothek\.de.*\/(urn:ard:(show|episode):[a-f0-9]+)/i);
+      if (ardAudiothekMatch) {
+        const urn = ardAudiothekMatch[1];
+        const isShow = urn.includes(':show:');
+        
+        try {
+          const results: Mp3Result[] = [];
+          const seenUrls = new Set<string>();
+
+          if (isShow) {
+            // For shows, first get the programset to find the numeric ID
+            const programsetResponse = await axios.get(`https://api.ardaudiothek.de/programsets/${urn}`, {
+              headers: { 'Accept': 'application/json' },
+              timeout: 10000,
+            });
+            
+            const programsetId = programsetResponse.data?.data?.programSet?.id;
+            if (programsetId) {
+              // Now fetch with the numeric ID and a high limit to get all episodes with audios
+              const itemsResponse = await axios.get(`https://api.ardaudiothek.de/programsets/${programsetId}?limit=200`, {
+                headers: { 'Accept': 'application/json' },
+                timeout: 15000,
+              });
+
+              const nodes = itemsResponse.data?.data?.programSet?.items?.nodes;
+              if (nodes && Array.isArray(nodes)) {
+                nodes.forEach((node: any) => {
+                  if (node.audios && Array.isArray(node.audios)) {
+                    node.audios.forEach((audio: any) => {
+                      if (audio.url && !seenUrls.has(audio.url)) {
+                        seenUrls.add(audio.url);
+                        results.push({
+                          id: randomUUID(),
+                          filename: extractFilename(audio.url),
+                          url: audio.url,
+                          source: 'ARD API',
+                        });
+                      }
+                    });
+                  }
+                });
+              }
+            }
+          } else {
+            // For single episodes
+            const itemResponse = await axios.get(`https://api.ardaudiothek.de/items/${urn}`, {
+              headers: { 'Accept': 'application/json' },
+              timeout: 10000,
+            });
+
+            const audios = itemResponse.data?.data?.item?.audios;
+            if (audios && Array.isArray(audios)) {
+              audios.forEach((audio: any) => {
+                if (audio.url && !seenUrls.has(audio.url)) {
+                  seenUrls.add(audio.url);
+                  results.push({
+                    id: randomUUID(),
+                    filename: extractFilename(audio.url),
+                    url: audio.url,
+                    source: 'ARD API',
+                  });
+                }
+              });
+            }
+          }
+
+          const extractResponse: ExtractMp3Response = {
+            results,
+            sourceUrl: url,
+          };
+
+          return res.json(extractResponse);
+        } catch (apiError) {
+          console.log("ARD API failed, falling back to HTML parsing", apiError);
+          // Fall through to regular HTML parsing
+        }
+      }
+
       // Fetch the webpage
       const response = await axios.get(url, {
         headers: {
